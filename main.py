@@ -45,7 +45,7 @@ def brute_force(thread_index, servers, credentials, scheme="http"):
     for credential in credentials:
         status = ['']
         for server in servers:
-            status = login(server, credential[0], credential[1])
+            status = login(server, credential[0], credential[1], scheme)
             if status[0] == True:
                 successful_logins[server] = [credential[0], credential[1]]
                 with lock:
@@ -135,3 +135,11 @@ if __name__ == "__main__":
     arguments.scheme = arguments.scheme if arguments.scheme else scheme
     if not arguments.write:
         arguments.write = f"{date.today()} {strftime('%H_%M_%S', localtime())}.csv"
+    display('+', f"Total Servers     = {Back.MAGENTA}{len(arguments.server)}{Back.RESET}")
+    display('+', f"Total Credentials = {Back.MAGENTA}{len(arguments.credentials)}{Back.RESET}")
+    t1 = time()
+    successful_logins = main(arguments.server, arguments.credentials, arguments.scheme)
+    t2 = time()
+    display(':', f"Successful Logins = {Back.MAGENTA}{len(successful_logins)}{Back.RESET}")
+    display(':', f"Time Taken        = {Back.MAGENTA}{t2-t1:.2f} seconds{Back.RESET}")
+    display(':', f"Rate              = {Back.MAGENTA}{len(arguments.credentials)/(t2-t1):.2f} logins / seconds{Back.RESET}")
