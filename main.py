@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-import requests
+import requests, warnings
 from base64 import b64encode
 from datetime import date
 from urllib.parse import quote
@@ -21,6 +21,7 @@ scheme = "http"
 login_endpoint = "/cgi/login.cgi"
 lock = Lock()
 thread_count = cpu_count()
+warnings.filterwarnings('ignore')
 
 def display(status, data, start='', end='\n'):
     print(f"{start}{status_color[status]}[{status}] {Fore.BLUE}[{date.today()} {strftime('%H:%M:%S', localtime())}] {status_color[status]}{Style.BRIGHT}{data}{Fore.RESET}{Style.RESET_ALL}", end=end)
