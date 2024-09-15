@@ -63,7 +63,6 @@ def main(servers, credentials, scheme="http", timeout=None):
     successful_logins = {}
     pool = Pool(thread_count)
     display('+', f"Starting {Back.MAGENTA}{thread_count} Brute Force Threads{Back.RESET}")
-    display(':', f"Credentials / Threads = {Back.MAGENTA}{len(credentials)//thread_count}{Back.RESET}")
     threads = []
     total_servers = len(servers)
     server_divisions = [servers[group*total_servers//thread_count: (group+1)*total_servers//thread_count] for group in range(thread_count)]
