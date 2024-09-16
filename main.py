@@ -99,7 +99,6 @@ if __name__ == "__main__":
         if not arguments.users:
             display('*', f"No {Back.MAGENTA}USER{Back.RESET} Specified")
             arguments.users = ['']
-            arguments.password = ['']
         else:
             try:
                 with open(arguments.users, 'r') as file:
@@ -111,8 +110,7 @@ if __name__ == "__main__":
                 exit(0)
             display(':', f"Users Loaded = {Back.MAGENTA}{len(arguments.users)}{Back.RESET}")
         if not arguments.password:
-            display('-', f"Please specify {Back.YELLOW}Passwords{Back.RESET}")
-            exit(0)
+            arguments.password = ['']
         elif arguments.password != ['']:
             try:
                 with open(arguments.password, 'r') as file:
