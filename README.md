@@ -1,5 +1,5 @@
 # Supermicro Brute Force
-A Simple Python Program that uses *requests* and *multithreading* to brute force **Supermicro** Servers.
+A Simple Python Program that uses *requests* and *multiprocessing* to brute force **Supermicro** Servers.
 ## Requirements
 Language Used = Python3<br />
 Modules/Packages used:
